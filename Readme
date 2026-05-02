@@ -1,1 +1,192 @@
+# 🌦️ Weather Data ETL Pipeline
+
+## Description
+This project is a complete ETL (Extract, Transform, Load) pipeline built with Python. It pulls live weather data from the OpenWeatherMap API for five cities around the world, transforms the raw JSON responses into a clean and structured format using pandas, and loads the results into a DuckDB database for analysis using SQL.
+
+The pipeline handles the full data lifecycle — from raw API calls to queryable analytics — all running locally on your machine.
+
+## How the Pipeline Works
+
+### 1. Extract
+The pipeline sends HTTP GET requests to the OpenWeatherMap Current Weather API for each city in the configured list. Each API call returns a JSON response containing:
+- Temperature (in Kelvin)
+- Humidity, pressure, and wind speed
+- Weather description (e.g., "clear sky", "light rain")
+- Timestamps and location metadata
+
+If a request fails for any city, the pipeline skips that city and continues with the rest — one failure doesn't crash the entire run.
+
+### 2. Transform
+The raw JSON responses are deeply nested and use inconvenient units. The transformation step:
+- **Flattens** the nested JSON into a flat row-per-city structure
+- **Converts temperatures** from Kelvin to Celsius (subtracts 273.15)
+- **Converts timestamps** from Unix integers to human-readable UTC datetime strings
+- **Fills missing values** with sensible defaults (`"unknown"` for weather descriptions, `0.0` for wind speed)
+- **Enforces data types** to ensure numeric columns are stored as integers or floats, not strings
+- **Adds a pipeline run date** to track when each batch of data was collected
+
+The result is a clean pandas DataFrame with 10 columns and one row per city.
+
+### 3. Load
+The cleaned DataFrame is inserted into a DuckDB database file (`weather_data.db`). DuckDB is a lightweight, serverless analytical database — no setup or server required. The pipeline creates the table automatically on the first run and appends new data on subsequent runs.
+
+## Features
+- 🌍 Extracts real-time weather data for multiple cities worldwide
+- 🌡️ Converts temperatures from Kelvin to Celsius
+- 🧹 Handles missing data with sensible defaults
+- 🗄️ Stores clean data in a local DuckDB database
+- 🔍 Supports SQL queries on collected weather data
+- 🔁 Can be run multiple times to accumulate historical data
+- 🛡️ Graceful error handling — one failed city doesn't crash the pipeline
+
+## Tech Stack
+| Technology | Purpose |
+|---|---|
+| **Python** | Core programming language |
+| **requests** | HTTP library for calling the OpenWeatherMap API |
+| **pandas** | Data manipulation and transformation |
+| **DuckDB** | Lightweight analytical database for storage and SQL queries |
+| **OpenWeatherMap API** | Source of live weather data |
+
+## Project Structure
+```
+weather-etl/
+├── config.py          # Configuration — API key and list of cities
+├── extract.py         # Extract step — API calls and data collection
+├── transform.py       # Transform step — data cleaning and structuring
+├── load.py            # Load step — inserting data into DuckDB
+├── pipeline.py        # Orchestrator — runs the full ETL pipeline
+├── weather_data.db    # DuckDB database file (created after first run)
+└── README.md          # Project documentation (this file)
+```
+
+### File Descriptions
+
+- **config.py**: Stores your OpenWeatherMap API key and the list of cities to extract data for. Keep your API key here so it's easy to update in one place.
+
+- **extract.py**: Contains two functions:
+  - `extract_weather(city, api_key)` — Extracts weather data for a single city
+  - `extract_all_cities(cities, api_key)` — Loops through all cities and collects their data into a list
+
+- **transform.py**: Contains `transform_weather_data(raw_data_list)` which takes the raw JSON list, flattens it into a pandas DataFrame, converts units, fills missing values, and enforces data types.
+
+- **load.py**: Contains the function that connects to DuckDB and inserts the DataFrame into the `weather_data` table.
+
+- **pipeline.py**: The main orchestrator that calls Extract → Transform → Load in sequence. This is the file you run to execute the full pipeline.
+
+## Setup
+
+### Prerequisites
+- Python 3.x installed on your machine
+- An OpenWeatherMap API key (free tier works — sign up at https://openweathermap.org/api)
+  - ⚠️ New API keys can take up to 10 minutes to activate after creation
+
+### Installation
+1. Clone or download this repository
+
+2. Navigate to the project folder:
+   ```bash
+   cd weather-etl
+   ```
+
+3. Install the required Python packages:
+   ```bash
+   pip install requests pandas duckdb
+   ```
+
+4. Open `config.py` and add your API key:
+   ```python
+   API_KEY = "your_api_key_here"
+
+   CITIES = ["London", "New York", "Tokyo", "Paris", "Sydney"]
+   ```
+
+## Usage
+
+### Run the Full Pipeline
+```bash
+python pipeline.py
+```
+This executes all three ETL steps in sequence and saves the results to `weather_data.db`.
+
+### Run Individual Steps for Testing
+```bash
+# Test extraction only
+python extract.py
+
+# Test transformation only
+python transform.py
+```
+
+### Query the Data with SQL
+After running the pipeline, you can query your data directly:
+```bash
+python pipeline.py
+```
+Or write your own SQL queries against `weather_data.db` using DuckDB.
+
+### Example Queries
+```sql
+-- Find the hottest city
+SELECT city, temperature_celsius
+FROM weather_data
+ORDER BY temperature_celsius DESC
+LIMIT 1;
+
+-- Average humidity across all cities
+SELECT AVG(humidity) as avg_humidity
+FROM weather_data;
+
+-- All data from a specific pipeline run
+SELECT * FROM weather_data
+WHERE pipeline_run_date = '2026-05-02 05:00:00';
+```
+
+## Sample Output
+After running `python transform.py`, you should see output like:
+```
+Testing transformation...
+  Successfully extracted data for London
+  Successfully extracted data for New York
+  Successfully extracted data for Tokyo
+  Successfully extracted data for Paris
+  Successfully extracted data for Sydney
+
+     city country  temperature_celsius  feels_like_celsius  humidity  pressure  wind_speed weather_description      data_timestamp     pipeline_run_date
+0  London      GB                12.34               10.56        72      1013        3.5          clear sky   2026-05-02 05:00:00  2026-05-02 05:00:00
+...
+
+Shape: (5, 10)
+```
+
+## Column Descriptions
+| Column | Type | Description |
+|---|---|---|
+| `city` | string | Name of the city |
+| `country` | string | Two-letter country code |
+| `temperature_celsius` | float | Current temperature in °C |
+| `feels_like_celsius` | float | "Feels like" temperature in °C |
+| `humidity` | int | Humidity percentage (0–100) |
+| `pressure` | int | Atmospheric pressure in hPa |
+| `wind_speed` | float | Wind speed in meters per second |
+| `weather_description` | string | Human-readable weather condition |
+| `data_timestamp` | string | When the weather data was recorded (UTC) |
+| `pipeline_run_date` | string | When the pipeline was executed (UTC) |
+
+## Troubleshooting
+
+| Problem | Solution |
+|---|---|
+| `401 Unauthorized` error | Your API key may still be activating. Wait 10 minutes and try again. |
+| `KeyError` in transform.py | A field is missing from the record dictionary. Compare your code with the project instructions. |
+| `ModuleNotFoundError` | Run `pip install requests pandas duckdb` to install missing packages. |
+| `ImportError` on extract/config | Make sure all `.py` files are in the same `weather-etl` folder. |
+
+## What I Learned
+- How ETL pipelines function in practice — extracting, transforming, and loading data in stages
+- Working with REST APIs and processing JSON responses
+- Data transformation and cleaning with pandas (handling nulls, type casting, unit conversion)
+- Storing and querying structured data with DuckDB and SQL
+- Python module organization — defining functions in one file and importing them in another
+- Error handling patterns that make pipelines resilient
 
